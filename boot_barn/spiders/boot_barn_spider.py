@@ -1,17 +1,75 @@
+from boot_barn.items import BootBarnItem
 from scrapy.cmdline import execute
 from boot_barn import db_config
-from boot_barn.items import BootBarnItem
 from typing import Iterable
 from scrapy import Request
+import lxml.html
 import pymysql
 import scrapy
+
+
+def get_store_state(store_info_selector) -> str:
+    state_name = ' '.join(store_info_selector.xpath('.//span[@class="store-address-state"]//text()'))
+    return state_name if state_name not in ['', ' '] else 'N/A'
+
+
+def get_store_url(store_selector) -> str:
+    url_slug = ' '.join(store_selector.xpath('.//div[@class="city"]/a/@href'))
+    store_url = 'https://www.bootbarn.com' + url_slug
+    return store_url if url_slug not in ['', ' '] else 'N/A'
+
+
+def get_store_no(store_selector) -> str:
+    store_no = ' '.join(store_selector.xpath('.//@store-id'))
+    return store_no if store_no not in ['', ' '] else 'N/A'
+
+
+def get_store_name(parsed_hmtl) -> str:
+    store_name = ' '.join(parsed_hmtl.xpath('//h1[@class="section-title"]/text()'))
+    return store_name if store_name not in ['', ' '] else 'N/A'
+
+
+def get_store_street(store_info_selector) -> str:
+    address1 = ' '.join(store_info_selector.xpath('.//span[@class="store-address1"]//text()'))
+    address2 = ' '.join(store_info_selector.xpath('.//span[@class="store-address2"]//text()'))
+    store_street = address1 + address2
+    return store_street if store_street not in [' ', ''] else 'N/A'
+
+
+def get_store_city(store_info_selector) -> str:
+    store_city = ' '.join(store_info_selector.xpath('.//span[@class="store-address-city"]//text()')).replace(',', '')
+    return store_city if store_city not in [' ', ''] else 'N/A'
+
+
+def get_store_zipcode(store_info_selector) -> str:
+    store_zipcode = ' '.join(store_info_selector.xpath('.//span[@class="store-address-postal-code"]//text()'))
+    return store_zipcode if store_zipcode not in [' ', ''] else 'N/A'
+
+
+def get_store_phone(store_info_selector) -> str:
+    store_phone = ' '.join(store_info_selector.xpath('.//div[@class="store-phone-container"]/a/span[@class="store-phone"]/text()'))
+    return store_phone if store_phone not in ['', ' '] else 'N/A'
+
+
+def get_store_direction_url(store_info_selector) -> str:
+    store_direction_url = ' '.join(store_info_selector.xpath('.//a[@title="Get Directions"]/@href'))
+    return store_direction_url if store_direction_url not in ['', ' '] else 'N/A'
+
+
+def get_store_open_hours(store_info_selector) -> str:
+    store_hours_selector = store_info_selector.xpath('.//div[contains(@class, "store-hours-container")]//div[@class="store-hours-days"]')[0]
+    open_days = store_hours_selector.xpath('./span[contains(@class, "stores-day")]/text()')
+    open_hours = store_hours_selector.xpath('./span[not (contains(@class, "stores-day"))]/text()')
+    store_open_hours = ' | '.join([day + hours for day, hours in zip(open_days, open_hours)]).replace('*', '')
+    return store_open_hours if store_open_hours not in ['', ' '] else 'N/A'
 
 
 class BootBarnStorelocatorSpider(scrapy.Spider):
     name = "boot_barn"
 
-    def __init__(self):
+    def __init__(self, ):
         """Initialize database connection and set file paths."""
+        super().__init__()
         self.client = pymysql.connect(host=db_config.db_host, user=db_config.db_user, password=db_config.db_password, database=db_config.db_name, autocommit=True)
         self.cursor = self.client.cursor()  # Create a cursor object to interact with the database
 
@@ -84,72 +142,72 @@ class BootBarnStorelocatorSpider(scrapy.Spider):
         # Page save
 
         # XPath for the top-level group divs
-        xpath_states = '//div[@class="store-group"]'
-        states_selector = response.xpath(xpath_states)
+        parsed_html = lxml.html.fromstring(html=response.text)
+        states_selector = parsed_html.xpath('//div[@class="store-group"]')
 
         # Iterate through each state group
         for state_selector in states_selector:
+
             # Use relative XPath to find the stores within the current state group
-            xpath_stores = './/div[@class="store"]'  # Relative XPath
-            stores_selectors = state_selector.xpath(xpath_stores)
-            xpath_state_name = './/a[@class="store-name"]/@name'
-            state_name = state_selector.xpath(xpath_state_name).get()
-            print('City:', state_name)
+            stores_selectors = state_selector.xpath('.//div[@class="store"]')  # Relative XPath for stores div containers
 
             # Iterate through each store
             for store_selector in stores_selectors:
-                xpath_store_url = './/div[@class="city"]/a/@href'
-                store_url = 'https://www.bootbarn.com' + store_selector.xpath(xpath_store_url).get()
+                store_url = get_store_url(store_selector)  # Get Store Url
                 print('Store url:', store_url)
-                # Sending request on store page to scrape more information
-                store_no = store_selector.xpath('.//@store-id').get()
+                store_no = get_store_no(store_selector)
 
                 item = BootBarnItem()
                 item['store_no'] = store_no
+                item['url'] = store_url
 
-                meta_dict = {'item': item}
-                yield scrapy.Request(url=store_url, cookies=self.cookies, headers=self.headers, dont_filter=True,
-                                     callback=self.parse_store_page, cb_kwargs=meta_dict)
+                # Sending request on store page to scrape more information
+                yield scrapy.Request(url=store_url, cookies=self.cookies, headers=self.headers,
+                                     dont_filter=True, callback=self.parse_store_page, cb_kwargs={'item': item})
 
-                # xpath_store_name = './/div/a/text()'
-                # store_name = store_selector.xpath(xpath_store_name).get()
-                # print("Store:", store_name)
-                # xpath_store_address = './/div[@class="address"]//text()'
-                # store_address = store_selector.xpath(xpath_store_address).get()
-                # print("Store Address:", store_address)
-                # exit()
             print('*' * 100)
 
     def parse_store_page(self, response, **kwargs):
+        # Page Save
+
         item = kwargs['item']
-        print(item)
-        store_name = response.xpath('//h1[@class="section-title"]/text()').get()
+
+        parsed_hmtl = lxml.html.fromstring(html=response.text)
+        store_name = get_store_name(parsed_hmtl)
         print("Store:", store_name)
+
         # Store Details
-        store_info_selector = response.xpath('//div[@class="store-details-container"]')
+        store_info_selector = parsed_hmtl.xpath('//div[@class="store-details-container"]')[0]
 
         # Address
-        store_address_selector = store_info_selector.xpath('.//div[@class="store-address-container"]')
-        # store_street = store_info_selector.xpath('.//')
-        store_city = store_info_selector.xpath('.//span[@class="store-address-city"]//text()').get()
-        store_state = store_info_selector.xpath('.//span[@class="store-address-state"]//text()').get()
-        store_zip_code = store_address_selector.xpath('//span[@class="store-address-postal-code"]//text()').get()
-        store_phone = store_address_selector.xpath('//div[@class="store-phone-container"]//text()').get()
-        store_direction_url = store_address_selector.xpath('//a[@title="Get Directions"]/@href').get()
+        store_street = get_store_street(store_info_selector)
+        store_city = get_store_city(store_info_selector)
+        store_state = get_store_state(store_info_selector)  # Get State Name
+
+        # store_address_selector = store_info_selector.xpath('.//div[@class="store-address-container"]')[0]
+        store_zip_code = get_store_zipcode(store_info_selector)
+        store_phone = get_store_phone(store_info_selector)
+        store_direction_url = get_store_direction_url(store_info_selector)
 
         item['name'] = store_name
         item['direction_url'] = store_direction_url
-        # item['street'] = store_street
+        item['street'] = store_street
         item['city'] = store_city
         item['state'] = store_state
         item['zip_code'] = store_zip_code
         item['phone'] = store_phone
-
         item['country'] = 'USA'
 
-        # xpath_store_address = './/div[@class="address"]//text()'
-        # store_address = response.xpath(xpath_store_address).get()
-        # print("Store Address:", store_address)
+        item['latitude'] = 'N/A'
+        item['longitude'] = 'N/A'
+        item['county'] = 'N/A'
+        item['open_hours'] = get_store_open_hours(store_info_selector)
+        item['status'] = 'N/A'
+        item['provider'] = 'Boot Barn'
+        item['category'] = 'Apparel'
+        item['updated_date'] = db_config.delivery_date
+
+        print(item)
         print('-' * 50)
         # Send the item data dictionary in pipeline to insert into Database
         yield item

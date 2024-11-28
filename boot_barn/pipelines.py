@@ -33,7 +33,6 @@ class BootBarnPipeline:
 
         # SQL query to create the table if it doesn't already exist
         create_table = f"""CREATE TABLE `{db_data_table}` (
-                            `index_id` INT AUTO_INCREMENT PRIMARY KEY,
                             `store_no` VARCHAR(50),
                             `name` VARCHAR(500),
                             `latitude` VARCHAR(500),
@@ -62,7 +61,7 @@ class BootBarnPipeline:
             logger.info(f'{db_data_table} table created.')
         except Exception as e:
             # Log any errors encountered during table creation
-            logger.error(f"Error creating table: {e}")
+            logger.warning(f"Error creating table: {e}")
 
     # Called for each item scraped
     def process_item(self, item, spider):

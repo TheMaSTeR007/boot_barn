@@ -5,7 +5,9 @@ db_user = 'root'
 db_password = 'actowiz'
 db_port = 3306
 
-delivery_date = str(datetime.today().strftime("%d_%m_%Y"))
+# delivery_date = datetime.today().strftime("%d_%m_%Y")
+delivery_date = datetime.today().strftime("%d-%m-%Y")
+
 db_name = 'storeLocator'
 
 # table query
